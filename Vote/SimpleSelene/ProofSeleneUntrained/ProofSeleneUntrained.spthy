@@ -1,0 +1,456 @@
+theory SimpleSelene begin
+
+// Function signature and definition of the equational theory E
+
+builtins: multiset
+functions: commit/3, fake/4, fst/1, open/3, pair/2, pk/1, snd/1
+equations:
+    fst(<x.1, x.2>) = x.1,
+    open(commit(ni1, r, pk(sk)), r, sk) = ni1,
+    snd(<x.1, x.2>) = x.2
+
+rule (modulo E) H_fresh:
+   [ Fr( ~x ) ]
+  --[ H( $H ), !HK( $H, $x.1, ~x ) ]->
+   [ !HK( $H, $x.1, ~x ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) H_send:
+   [ !HK( $H, $x.1, x.2 ) ]
+  --[ Send( $H, $x.1, x.2 ), H( $H ) ]->
+   [ Out( <$x.1, x.2> ) ]
+
+  /*
+  rule (modulo AC) H_send:
+     [ !HK( $H, $x, x.1 ) ]
+    --[ Send( $H, $x, x.1 ), H( $H ) ]->
+     [ Out( <$x, x.1> ) ]
+  */
+
+rule (modulo E) H_receive:
+   [ In( <$x.1, x.2> ) ]
+  --[ Receive( $H, $x.1, x.2 ), !HK( $H, $x.1, x.2 ), H( $H ) ]->
+   [ !HK( $H, $x.1, x.2 ) ]
+
+  /*
+  rule (modulo AC) H_receive:
+     [ In( <$x, x.1> ) ]
+    --[ Receive( $H, $x, x.1 ), !HK( $H, $x, x.1 ), H( $H ) ]->
+     [ !HK( $H, $x, x.1 ) ]
+  */
+
+rule (modulo E) H_send_S2:
+   [ !HK( $H, $x.1, x.2 ), !HK( $H, $y.1, y.2 ) ]
+  --[ Send( $H, $x.1, x.2 ), Send( $H, $y.1, y.2 ), H( $H ), To( $H )
+  ]->
+   [ !Broadcast( $H, <$x.1, $y.1>, <x.2, y.2> ) ]
+
+  // loop breakers: [0,1]
+  /*
+  rule (modulo AC) H_send_S2:
+     [ !HK( $H, $x, x.1 ), !HK( $H, $y, y.1 ) ]
+    --[ Send( $H, $x, x.1 ), Send( $H, $y, y.1 ), H( $H ), To( $H ) ]->
+     [ !Broadcast( $H, <$x, $y>, <x.1, y.1> ) ]
+    // loop breakers: [0,1]
+  */
+
+rule (modulo E) H_receive_S2:
+   [ !Broadcast( $H, <$x.1, $y.1>, <x.2, y.2> ) ]
+  --[
+  Receive( $H, $x.1, x.2 ), Receive( $H, $y.1, y.2 ),
+  !HK( $H, $x.1, x.2 ), !HK( $H, $y.1, y.2 ), H( $H ), From( $H )
+  ]->
+   [ !HK( $H, $x.1, x.2 ), !HK( $H, $y.1, y.2 ) ]
+
+  /*
+  rule (modulo AC) H_receive_S2:
+     [ !Broadcast( $H, <$x, $y>, <x.1, y.1> ) ]
+    --[
+    Receive( $H, $x, x.1 ), Receive( $H, $y, y.1 ), !HK( $H, $x, x.1 ),
+    !HK( $H, $y, y.1 ), H( $H ), From( $H )
+    ]->
+     [ !HK( $H, $x, x.1 ), !HK( $H, $y, y.1 ) ]
+  */
+
+rule (modulo E) Setup_EA_T1:
+   [
+   Fr( ~ltkV1 ), Fr( ~ltkV2 ), Fr( ~ltkT ), Fr( ~ni1 ), Fr( ~ni2 ),
+   Fr( ~rnd1 ), Fr( ~rnd2 )
+   ]
+  --[ OnlyOnce( ), Vote( ~ltkV1, 'candA' ), Vote( ~ltkV2, 'candB' )
+  ]->
+   [
+   Out( pk(~ltkV1) ), Out( pk(~ltkV2) ), Out( pk(~ltkT) ),
+   !InitK( $H, 'vote', 'candA' ), !InitK( $H, 'ltk', ~ltkV1 ),
+   !InitK( $H, 'pk', pk(~ltkV1) ), !HK( $H, 'vote', 'candA' ),
+   !HK( $H, 'ltk', ~ltkV1 ), !HK( $H, 'pk', pk(~ltkV1) ),
+   Associate( $H, <'pk', 'ltk'>, <pk(~ltkV2), ~ltkV2> ),
+   !Shuffle_trackers( (<~ni1, pk(~ltkV1)>+<~ni2, pk(~ltkV2)>) ),
+   Out( (~ni1+~ni2) ),
+   Out( <pk(~ltkV1), commit(~ni1, ~rnd1, pk(~ltkV1))> ),
+   Out( <pk(~ltkV2), commit(~ni2, ~rnd2, pk(~ltkV2))> ),
+   !Broadcast( $H, <'commitment', 'pk'>,
+               <commit(~ni1, ~rnd1, pk(~ltkV1)), pk(~ltkV1)>
+   ),
+   SendCommitment( $H, <'commitment', 'pk'>,
+                   <commit(~ni2, ~rnd2, pk(~ltkV2)), pk(~ltkV2)>
+   ),
+   Votes( $H, <'vote', 'pk'>, <'candB', pk(~ltkV2)> ),
+   St_T_1( ~ltkT, pk(~ltkV1), ~rnd1, ~ni1,
+           commit(~ni1, ~rnd1, pk(~ltkV1))
+   ),
+   St_T_1( ~ltkT, pk(~ltkV2), ~rnd2, ~ni2,
+           commit(~ni2, ~rnd2, pk(~ltkV2))
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) V_Vote1:
+   [ !InitK( $H, 'vote', vote ), !InitK( $H, 'pk', pkV ) ]
+  --[
+  H_role( $H, '1' ), Send( $H, 'vote', vote ), Send( $H, 'pk', pkV ),
+  To( $H )
+  ]->
+   [ !Broadcast( $H, <'vote', 'pk'>, <vote, pkV> ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) T2_T2_sync:
+   [
+   !Broadcast( $H, <'vote', 'pk'>, <vote1, pkV1> ),
+   Votes( $H, <'vote', 'pk'>, <vote2, pkV2> ),
+   St_T_1( ~ltkT, pkV1, rnd1, ni1, cmt1 ),
+   St_T_1( ~ltkT, pkV2, rnd2, ni2, cmt2 )
+   ]
+  --[ TwoVotes( vote1, vote2 ) ]->
+   [
+   SendBiToVoter( rnd1 ), SendBiToVoter( rnd2 ),
+   !PublishVote( (<ni1, vote1>+<ni2, vote2>) ),
+   Out( (<ni1, vote1>+<ni2, vote2>) )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) V_getNi1:
+   [
+   !Broadcast( $H, <'commitment', 'pk'>, <cmt, pkV> ),
+   !InitK( $H, 'pk', pkV ), !InitK( $H, 'ltk', ~ltkV )
+   ]
+  --[
+  H_role( $H, '1' ), Receive( $H, 'pk', pkV ),
+  Receive( $H, 'commitment', cmt ), From( $H ),
+  Send( $H, 'ltk', ~ltkV ), Send( $H, 'commitment', cmt ), To( $H )
+  ]->
+   [ !Broadcast( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) V_getNi2:
+   [
+   SendCommitment( $H, <'commitment', 'pk'>, <cmt, pkV> ),
+   Associate( $H, <'pk', 'ltk'>, <pkV, ~ltkV> )
+   ]
+  -->
+   [ LtkCommit( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) publishVote1:
+   [
+   SendBiToVoter( bi ),
+   !Broadcast( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ),
+   !PublishVote( (y+<open(cmt, bi, ~ltkV), vote>) )
+   ]
+  --[ Verified( <~ltkV, vote> ) ]->
+   [ ]
+
+  /*
+  rule (modulo AC) publishVote1:
+     [
+     SendBiToVoter( bi ),
+     !Broadcast( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ),
+     !PublishVote( (y+<z, vote>) )
+     ]
+    --[ Verified( <~ltkV, vote> ) ]->
+     [ ]
+    variants (modulo AC)
+    1. ~ltkV = ~ltkV.13
+       bi    = bi.14
+       cmt   = cmt.15
+       z     = open(cmt.15, bi.14, ~ltkV.13)
+    
+    2. ~ltkV = ~ltkV.18
+       bi    = bi.19
+       cmt   = commit(z.25, bi.19, pk(~ltkV.18))
+       z     = z.25
+  */
+
+rule (modulo E) publishVote2:
+   [
+   SendBiToVoter( bi ),
+   LtkCommit( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ),
+   !PublishVote( (y+<open(cmt, bi, ~ltkV), vote>) )
+   ]
+  --[ Checked( <~ltkV, vote> ) ]->
+   [ ]
+
+  /*
+  rule (modulo AC) publishVote2:
+     [
+     SendBiToVoter( bi ),
+     LtkCommit( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ),
+     !PublishVote( (y+<z, vote>) )
+     ]
+    --[ Checked( <~ltkV, vote> ) ]->
+     [ ]
+    variants (modulo AC)
+    1. ~ltkV = ~ltkV.13
+       bi    = bi.14
+       cmt   = cmt.15
+       z     = open(cmt.15, bi.14, ~ltkV.13)
+    
+    2. ~ltkV = ~ltkV.18
+       bi    = bi.19
+       cmt   = commit(z.25, bi.19, pk(~ltkV.18))
+       z     = z.25
+  */
+
+restriction onlyOnce:
+  "∀ #i #j. ((OnlyOnce( ) @ #i) ∧ (OnlyOnce( ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction two_votes:
+  "∀ #i vote1 vote2.
+    (TwoVotes( vote1, vote2 ) @ #i) ⇒ (¬(vote1 = vote2))"
+  // safety formula
+
+lemma verif:
+  all-traces
+  "∀ #i l vote.
+    (Verified( <l, vote> ) @ #i) ⇒
+    (∃ #j. (Vote( l, vote ) @ #j) ∧ (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ #i l vote.
+  (Verified( <l, vote> ) @ #i)
+ ∧
+  ∀ #j. (Vote( l, vote ) @ #j) ⇒ ¬(#j < #i)"
+*/
+simplify
+solve( SendBiToVoter( bi ) ▶₀ #i )
+  case T2_T2_sync_case_1
+  solve( !HK( $H.1, 'pk', pk(~ltkV1) ) ▶₁ #vr.1 )
+    case H_receive
+    by sorry
+  next
+    case H_receive_S2_case_1
+    by sorry
+  next
+    case H_receive_S2_case_2
+    by sorry
+  next
+    case H_receive_S2_case_3
+    by sorry
+  next
+    case Setup_EA_T1
+    solve( !HK( $H.1, 'vote', vote1 ) ▶₀ #vr.1 )
+      case H_fresh
+      solve( !PublishVote( (y+<z, vote>) ) ▶₂ #i )
+        case T2_T2_sync_case_1
+        by sorry
+      next
+        case T2_T2_sync_case_2
+        solve( !Broadcast( $H, <'ltk', 'commitment'>,
+                           <~ltkV, commit(~ni1, ~rnd1, pk(~ltkV))>
+               ) ▶₁ #i )
+          case H_send_S2
+          solve( !HK( $H, 'ltk', ~ltkV ) ▶₀ #vr.4 )
+            case H_fresh
+            by sorry
+          next
+            case H_receive
+            by sorry
+          next
+            case H_receive_S2_case_1
+            by sorry
+          next
+            case H_receive_S2_case_2
+            by sorry
+          next
+            case Setup_EA_T1
+            solve( !HK( $H, 'commitment', commit(~ni1, ~rnd1, pk(~ltkV))
+                   ) ▶₁ #vr.4 )
+              case H_receive
+              by sorry
+            next
+              case H_receive_S2_case_1
+              by sorry
+            next
+              case H_receive_S2_case_2
+              SOLVED // trace found
+            next
+              case H_receive_S2_case_3
+              by sorry
+            qed
+          qed
+        qed
+      qed
+    next
+      case H_receive
+      by sorry
+    next
+      case H_receive_S2_case_1
+      by sorry
+    next
+      case H_receive_S2_case_2
+      by sorry
+    next
+      case Setup_EA_T1
+      by sorry
+    qed
+  qed
+next
+  case T2_T2_sync_case_2
+  by sorry
+qed
+
+lemma check:
+  all-traces
+  "∀ #i l vote.
+    (Checked( <l, vote> ) @ #i) ⇒
+    (∃ #j. (Vote( l, vote ) @ #j) ∧ (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ #i l vote.
+  (Checked( <l, vote> ) @ #i)
+ ∧
+  ∀ #j. (Vote( l, vote ) @ #j) ⇒ ¬(#j < #i)"
+*/
+simplify
+solve( SendBiToVoter( bi ) ▶₀ #i )
+  case T2_T2_sync_case_1
+  solve( LtkCommit( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ) ▶₁ #i )
+    case V_getNi2
+    by solve( !PublishVote( (y+<z, vote>) ) ▶₂ #i )
+  qed
+next
+  case T2_T2_sync_case_2
+  solve( LtkCommit( $H, <'ltk', 'commitment'>, <~ltkV, cmt> ) ▶₁ #i )
+    case V_getNi2
+    solve( !PublishVote( (y+<~ni2, vote>) ) ▶₂ #i )
+      case T2_T2_sync
+      by contradiction /* from formulas */
+    qed
+  qed
+qed
+
+lemma exec:
+  exists-trace
+  "∃ #i #j v1 l1 v2 l2.
+    (Verified( <l1, v1> ) @ #i) ∧ (Checked( <l2, v2> ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ #i #j v1 l1 v2 l2.
+  (Verified( <l1, v1> ) @ #i) ∧ (Checked( <l2, v2> ) @ #j)"
+*/
+simplify
+solve( SendBiToVoter( bi ) ▶₀ #i )
+  case T2_T2_sync_case_1
+  solve( SendBiToVoter( bi ) ▶₀ #j )
+    case T2_T2_sync
+    solve( !PublishVote( (y+<z, v1>) ) ▶₂ #i )
+      case T2_T2_sync_case_1
+      by sorry
+    next
+      case T2_T2_sync_case_2
+      solve( !PublishVote( (y+<z, v2>) ) ▶₂ #j )
+        case T2_T2_sync_case_1
+        solve( !HK( $H.2, 'vote', v1 ) ▶₀ #vr.1 )
+          case H_fresh
+          by sorry
+        next
+          case H_receive
+          by sorry
+        next
+          case H_receive_S2_case_1
+          by sorry
+        next
+          case H_receive_S2_case_2
+          by sorry
+        next
+          case Setup_EA_T1
+          solve( !HK( $H.2, 'pk', pk(~ltkV1) ) ▶₁ #vr.1 )
+            case H_receive
+            by sorry
+          next
+            case H_receive_S2_case_1
+            by sorry
+          next
+            case H_receive_S2_case_2
+            by sorry
+          next
+            case H_receive_S2_case_3
+            by sorry
+          next
+            case Setup_EA_T1
+            solve( LtkCommit( $H.1, <'ltk', 'commitment'>,
+                              <~ltkV.1, commit(~ni2, ~rnd2, pk(~ltkV.1))>
+                   ) ▶₁ #j )
+              case V_getNi2
+              solve( !Broadcast( $H, <'ltk', 'commitment'>,
+                                 <~ltkV, commit(~ni1, ~rnd1, pk(~ltkV))>
+                     ) ▶₁ #i )
+                case H_send_S2
+                solve( !HK( $H, 'ltk', ~ltkV ) ▶₀ #vr.4 )
+                  case H_fresh
+                  by sorry
+                next
+                  case H_receive
+                  by sorry
+                next
+                  case H_receive_S2_case_1
+                  by sorry
+                next
+                  case H_receive_S2_case_2
+                  by sorry
+                next
+                  case Setup_EA_T1
+                  solve( !HK( $H, 'commitment', commit(~ni1, ~rnd1, pk(~ltkV))
+                         ) ▶₁ #vr.4 )
+                    case H_receive
+                    by sorry
+                  next
+                    case H_receive_S2_case_1
+                    by sorry
+                  next
+                    case H_receive_S2_case_2
+                    SOLVED // trace found
+                  next
+                    case H_receive_S2_case_3
+                    by sorry
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      next
+        case T2_T2_sync_case_2
+        by sorry
+      qed
+    qed
+  qed
+next
+  case T2_T2_sync_case_2
+  by sorry
+qed
+
+restriction only_fallible_humansRB:
+  "¬(∃ H x #k. H_role( H, x ) @ #k)"
+  // safety formula
+
+/* All well-formedness checks were successful. */
+
+end

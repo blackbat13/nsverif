@@ -1,0 +1,157 @@
+theory SimpleSelene
+begin
+
+builtins: multiset
+
+functions: pk/1,
+           open/3, commit/3, fake/4
+
+equations: open(commit(ni1, r, pk(sk)), r, sk) = ni1
+
+rule H_fresh:
+  [ Fr(~x) ]
+  --[ H($H), !HK($H,$x.1, ~x) ]->
+  [ !HK($H, $x.1, ~x) ]
+
+rule H_send:
+  [ !HK($H, $x.1, x.2) ]
+  --[ Send($H, $x.1, x.2),  H($H) ]->
+  [ Out(< $x.1, x.2 >) ]
+
+rule H_receive:
+  [ In(< $x.1, x.2 >) ]
+  --[ Receive($H, $x.1, x.2 ), !HK($H, $x.1, x.2), H($H) ]->
+  [ !HK($H, $x.1, x.2) ]
+
+rule H_send_S2:
+  [ !HK($H, $x.1, x.2), !HK($H, $y.1, y.2) ]
+  --[ Send($H, $x.1, x.2), Send($H, $y.1, y.2), H($H), To($H) ]->
+  [ !Broadcast($H,  < $x.1, $y.1 >, < x.2, y.2 >) ]
+
+rule H_receive_S2:
+  [ !Broadcast($H, < $x.1, $y.1 >, < x.2, y.2 >) ]
+  --[ Receive($H, $x.1, x.2), Receive($H, $y.1, y.2), !HK($H, $x.1, x.2), !HK($H, $y.1, y.2), H($H), From($H) ]->
+  [ !HK($H, $x.1, x.2), !HK($H, $y.1, y.2) ]
+
+rule Setup_EA_T1:
+ let
+    pkV1 = pk(~ltkV1)
+    pkV2 = pk(~ltkV2)
+    cmt1 = commit(~ni1, ~rnd1, pkV1)
+    cmt2 = commit(~ni2, ~rnd2, pkV2)
+    vote1 = 'candA'
+    vote2 = 'candB'
+ in
+ [ Fr(~ltkV1), Fr(~ltkV2), Fr(~ltkT),
+   Fr(~ni1), Fr(~ni2),
+   Fr(~rnd1), Fr(~rnd2) ]
+ --[ OnlyOnce(), Vote(~ltkV1,vote1), Vote(~ltkV2,vote2) ]->
+ [ Out(pkV1), Out(pkV2), Out(pk(~ltkT)),
+
+   !InitK($H,'vote',vote1),
+   !InitK($H,'ltk',~ltkV1),
+   !InitK($H,'pk',pkV1),
+   !HK($H,'vote',vote1),
+   !HK($H,'ltk',~ltkV1),
+   !HK($H,'pk',pkV1),
+
+   Associate($H,<'pk','ltk'>,<pkV2,~ltkV2>),
+
+   !Shuffle_trackers(<~ni1, pkV1>  + <~ni2, pkV2>), Out(~ni1 + ~ni2),
+   
+   Out(<pkV1, cmt1>),
+   Out(<pkV2, cmt2>),
+   !Broadcast($H,<'commitment','pk'>,<cmt1, pkV1>),
+   SendCommitment($H,<'commitment','pk'>,<cmt2, pkV2>),
+
+   Votes($H,<'vote','pk'>,<vote2,pkV2>),
+
+   St_T_1(~ltkT, pkV1, ~rnd1, ~ni1, cmt1),
+   St_T_1(~ltkT, pkV2, ~rnd2, ~ni2, cmt2) ]
+
+// Voting
+rule V_Vote1:
+  [ !InitK($H,'vote',vote), !InitK($H,'pk',pkV) ]
+  --[ H_role($H,'1'), Send($H, 'vote', vote), Send($H, 'pk', pkV), To($H) ]->
+  [ !Broadcast($H,<'vote','pk'>,<vote,pkV>) ]
+
+// Teller receives and posts vote
+// Synchronize tellers and shuffle votes
+rule T2_T2_sync:
+  [ !Broadcast($H,<'vote','pk'>,<vote1,pkV1>),
+    Votes($H,<'vote','pk'>,<vote2,pkV2>),
+    St_T_1(~ltkT, pkV1, rnd1, ni1, cmt1),
+    St_T_1(~ltkT, pkV2, rnd2, ni2, cmt2) ]
+
+  --[ TwoVotes(vote1,vote2) ]->
+
+  [ SendBiToVoter(rnd1), SendBiToVoter(rnd2), 
+    !PublishVote(<ni1, vote1> + <ni2, vote2>),
+    Out(<ni1, vote1> + <ni2, vote2>) ]
+
+// Voter checks vote
+rule V_getNi1:
+  [ !Broadcast($H,<'commitment','pk'>,<cmt,pkV>),
+    !InitK($H,'pk',pkV), !InitK($H,'ltk',~ltkV)
+  ]
+  --[ H_role($H,'1'), Receive($H, 'pk', pkV), Receive($H, 'commitment', cmt), From($H), Send($H, 'ltk', ~ltkV), Send($H, 'commitment', cmt), To($H) ]->
+  [ !Broadcast($H,<'ltk','commitment'>,<~ltkV,cmt>) ]
+
+rule V_getNi2:
+  [ SendCommitment($H,<'commitment','pk'>,<cmt,pkV>),
+  	Associate($H,<'pk','ltk'>,<pkV,~ltkV>)
+  ]
+  -->
+  [ LtkCommit($H,<'ltk','commitment'>,<~ltkV,cmt>) ]
+
+rule publishVote1:
+  let
+    ni = open(cmt, bi, ~ltkV)
+  in
+  [ SendBiToVoter(bi),
+    !Broadcast($H,<'ltk','commitment'>,<~ltkV,cmt>),
+    !PublishVote(<ni, vote> + y)
+     ]
+  --[ Verified(<~ltkV,vote>) ]->
+  [  ]
+
+rule publishVote2:
+  let
+    ni = open(cmt, bi, ~ltkV)
+  in
+  [ SendBiToVoter(bi),
+    LtkCommit($H,<'ltk','commitment'>,<~ltkV,cmt>),
+    !PublishVote(<ni, vote> + y)
+     ]
+  --[ Checked(<~ltkV,vote>) ]->
+  [  ]
+
+restriction onlyOnce:
+  " All #i #j. OnlyOnce()@i & OnlyOnce()@j ==> #i = #j"
+
+restriction two_votes:
+  " All #i vote1 vote2. TwoVotes(vote1,vote2) @i ==> not (vote1 = vote2) "
+
+lemma verif:
+  " All #i l vote. Verified(<l,vote>)@i ==> (Ex #j. Vote(l,vote) @j & j < i)"
+
+lemma check:
+  " All #i l vote. Checked(<l,vote>)@i ==> (Ex #j. Vote(l,vote) @j & j < i)"
+
+lemma exec:
+  exists-trace
+  " Ex #i #j v1 l1 v2 l2. Verified(<l1,v1>)@i & Checked(<l2,v2>)@j "
+
+
+#ifdef infallible
+restriction only_infallible_humans:
+  "not (Ex H #k. H(H) @k)"
+#endif
+
+#ifdef untrained
+restriction only_fallible_humansRB:  
+    "(not (Ex H x #k. H_role(H,x) @k))" 
+#endif
+
+
+end
